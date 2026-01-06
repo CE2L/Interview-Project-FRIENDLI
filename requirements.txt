@@ -1,0 +1,7 @@
+snowflake-connector-python
+pandas
+boto3
+streamlit
+altair
+openai
+google-genai

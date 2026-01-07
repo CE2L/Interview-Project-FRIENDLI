@@ -2,6 +2,7 @@ import os
 import boto3
 import snowflake.connector
 import google.genai as genai
+from openai import OpenAI
 import time
 import re
 import warnings
@@ -40,6 +41,10 @@ AWS_SECRET_KEY=os.environ.get("AWS_SECRET_KEY")
 AWS_REGION=os.environ.get("AWS_REGION")
 BUCKET_NAME=os.environ.get("S3_BUCKET_NAME")
 FILE_KEY=os.environ.get("S3_FILE_KEY")
+
+AI_PROVIDER=os.environ.get("AI_PROVIDER","GEMINI").upper()
+OPENAI_API_KEY=os.environ.get("OPENAI_API_KEY")
+FRIENDLI_TOKEN=os.environ.get("FRIENDLI_TOKEN")
 
 genai.configure(api_key=GOOGLE_API_KEY)
 
@@ -92,11 +97,43 @@ def extract_decision(text):
 def analyze(transcript):
     start_t=time.time()
     try:
-        model=genai.GenerativeModel("gemini-2.0-flash-exp")
-        full_prompt=f"{SYSTEM_PROMPT}\n\n[면접 내용]\n{transcript}"
-        response=model.generate_content(full_prompt)
-        latency=round(time.time()-start_t,3)
-        return (response.text or "").strip(),latency
+        if AI_PROVIDER=="GEMINI":
+            model=genai.GenerativeModel("gemini-2.0-flash-exp")
+            full_prompt=f"{SYSTEM_PROMPT}\n\n[면접 내용]\n{transcript}"
+            response=model.generate_content(full_prompt)
+            latency=round(time.time()-start_t,3)
+            return (response.text or "").strip(),latency
+
+        if AI_PROVIDER=="OPENAI":
+            client=OpenAI(api_key=OPENAI_API_KEY)
+            resp=client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role":"system","content":SYSTEM_PROMPT},
+                    {"role":"user","content":f"[면접 내용]\n{transcript}"},
+                ],
+                temperature=0.1,
+                max_tokens=1000,
+            )
+            latency=round(time.time()-start_t,3)
+            return (resp.choices[0].message.content or "").strip(),latency
+
+        if AI_PROVIDER=="FRIENDLI":
+            client=OpenAI(api_key=FRIENDLI_TOKEN,base_url="https://api.friendli.ai/serverless/v1")
+            resp=client.chat.completions.create(
+                model="meta-llama-3.3-70b-instruct",
+                messages=[
+                    {"role":"system","content":SYSTEM_PROMPT},
+                    {"role":"user","content":f"[면접 내용]\n{transcript}"},
+                ],
+                temperature=0.1,
+                max_tokens=1000,
+            )
+            latency=round(time.time()-start_t,3)
+            return (resp.choices[0].message.content or "").strip(),latency
+
+        raise ValueError(f"Unknown AI_PROVIDER: {AI_PROVIDER}")
+
     except Exception as e:
         print(f"Gemini 호출 실패: {e}")
         return "",0.0
@@ -161,7 +198,7 @@ def run():
                 (CANDIDATE_NAME, AI_MODEL, AI_SUMMARY, INTERVIEW_SCORE, HIRING_DECISION, LATENCY_SEC)
                 VALUES (%s, %s, %s, %s, %s, %s)
                 """,
-                (name,"GEMINI",result_text,score,decision,dt),
+                (name,AI_PROVIDER,result_text,score,decision,dt),
             )
 
             print(f"{score}점 {decision}")
